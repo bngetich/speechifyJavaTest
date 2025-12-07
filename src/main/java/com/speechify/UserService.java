@@ -16,9 +16,11 @@ public class UserService {
     private static final String DB_FILE = "db.json";
     private final ObjectMapper objectMapper;
     private ClientRepository clientRepository;
+    private LRUCache<User> lruCache;
 
     public UserService() {
         this.objectMapper = new ObjectMapper();
+        this.lruCache = LRUCacheProvider.createLRUCache(new CacheLimits(5));
     }
 
     public CompletableFuture<Boolean> addUser(
@@ -86,6 +88,9 @@ public class UserService {
                 // Add user to database
                 users.add(objectMapper.valueToTree(user));
                 objectMapper.writeValue(dbFile, root);
+
+                //Add user to cache
+                lruCache.set(user.getEmail(), user);
                 return true;
             } catch (IOException e) {
                 return false;
@@ -148,6 +153,9 @@ public class UserService {
     }
 
     public CompletableFuture<User> getUserByEmail(String email) {
+        //check if exists in cache
+        User user = lruCache.get(email);
+        if(user != null) return CompletableFuture.supplyAsync(() -> user);
         return CompletableFuture.supplyAsync(() -> {
             try {
                 File dbFile = new File(DB_FILE);

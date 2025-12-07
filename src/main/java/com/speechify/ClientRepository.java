@@ -27,17 +27,8 @@ public class ClientRepository {
 
                 ObjectNode root = (ObjectNode) objectMapper.readTree(dbFile);
                 ArrayNode clients = (ArrayNode) root.get("clients");
-                
-                for (int i = 0; i < clients.size(); i++) {
-                    ObjectNode clientNode = (ObjectNode) clients.get(i);
-                    if (clientNode.get("id").asText().equals(id)) {
-                        Client client = new Client();
-                        client.setId(clientNode.get("id").asText());
-                        client.setName(clientNode.get("name").asText());
-                        return client;
-                    }
-                }
-                return null;
+                Client client = findClientById(clients, id);
+                return client;
             } catch (IOException e) {
                 return null;
             }
@@ -54,19 +45,39 @@ public class ClientRepository {
 
                 ObjectNode root = (ObjectNode) objectMapper.readTree(dbFile);
                 ArrayNode clients = (ArrayNode) root.get("clients");
-                List<Client> clientList = new ArrayList<>();
-
-                for (int i = 0; i < clients.size(); i++) {
-                    ObjectNode clientNode = (ObjectNode) clients.get(i);
-                    Client client = new Client();
-                    client.setId(clientNode.get("id").asText());
-                    client.setName(clientNode.get("name").asText());
-                    clientList.add(client);
-                }
+                List<Client> clientList = findAllClients(clients);
                 return clientList;
             } catch (IOException e) {
                 return new ArrayList<>();
             }
         });
     }
-} 
+
+    private Client findClientById(ArrayNode clients, String id) {
+        for (int i = 0; i < clients.size(); i++) {
+            ObjectNode clientNode = (ObjectNode) clients.get(i);
+            if (clientNode.get("id").asText().equals(id)) {
+                Client client = new Client();
+                client.setId(clientNode.get("id").asText());
+                client.setName(clientNode.get("name").asText());
+                return client;
+            }
+        }
+
+        return null;
+    }
+
+    private List<Client> findAllClients(ArrayNode clients) {
+        List<Client> clientList = new ArrayList<>();
+        for (int i = 0; i < clients.size(); i++) {
+            ObjectNode clientNode = (ObjectNode) clients.get(i);
+            Client client = new Client();
+            client.setId(clientNode.get("id").asText());
+            client.setName(clientNode.get("name").asText());
+            clientList.add(client);
+        }
+
+        return clientList;
+    }
+
+}
