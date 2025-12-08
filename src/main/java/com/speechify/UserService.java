@@ -28,7 +28,8 @@ public class UserService {
     public UserService(ClientRepository clientRepository) {
         this.clientRepository = clientRepository;
         this.objectMapper = new ObjectMapper();
-        this.lruCache = LRUCacheProvider.createLRUCache(new CacheLimits(5));
+        // Use capacity > 100 to get ConcurrentLRUCache (thread-safe)
+        this.lruCache = LRUCacheProvider.createLRUCache(new CacheLimits(150));
     }
 
     public CompletableFuture<Boolean> addUser(
@@ -199,27 +200,5 @@ public class UserService {
     private boolean isValidAge(LocalDate dateOfBirth) {
         int age = Period.between(dateOfBirth, LocalDate.now()).getYears();
         return age >= 21;
-    }
-
-    private CompletableFuture<Boolean> userExistsByEmail(String email) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                ArrayNode users = loadUsersArray();
-                if (users == null) {
-                    return false;
-                }
-
-                for (int i = 0; i < users.size(); i++) {
-                    ObjectNode userNode = (ObjectNode) users.get(i);
-                    if (userNode.get("email").asText().equals(email)) {
-                        return true;
-                    }
-                }
-                return false;
-            } catch (IOException e) {
-                logger.severe("Error checking user existence: " + e.getMessage());
-                return false;
-            }
-        });
     }
 }

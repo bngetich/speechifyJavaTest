@@ -13,6 +13,15 @@ package com.speechify;
 
 public class LRUCacheProvider {
     public static <T> LRUCache<T> createLRUCache(CacheLimits options) {
-        return new LRUCacheImpl<>(options.getMaxItemsCount());
+        int capacity = options.getMaxItemsCount();
+
+        // Factory logic: choose implementation based on capacity
+        if(capacity > 100){
+            // For larger caches, use thread-safe version
+            return new ConcurrentLRUCache<>(capacity);
+        }
+
+        // For small caches, use simple version (faster)
+        return new SimpleLRUCache<>(capacity);
     }
 }
