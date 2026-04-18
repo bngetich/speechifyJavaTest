@@ -13,23 +13,24 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 
 public class UserService {
-    private static final String DB_FILE = "db.json";
+    private static final String DEFAULT_DB_FILE = "src/main/java/com/speechify/db.json";
     private static final java.util.logging.Logger logger = 
         java.util.logging.Logger.getLogger(UserService.class.getName());
 
+    private final String dbFile;
     private final ObjectMapper objectMapper;
-    private ClientRepository clientRepository;
-    private LRUCache<User> lruCache;
+    private final ClientRepository clientRepository;
+    private final LRUCache<User> lruCache;
 
-    public UserService(){
-        this(new ClientRepository());
+    public UserService() {
+        this(new ClientRepository(DEFAULT_DB_FILE), DEFAULT_DB_FILE);
     }
 
-    public UserService(ClientRepository clientRepository) {
+    public UserService(ClientRepository clientRepository, String dbFile) {
         this.clientRepository = clientRepository;
+        this.dbFile = dbFile;
         this.objectMapper = new ObjectMapper();
-        // Use capacity > 100 to get ConcurrentLRUCache (thread-safe)
-        this.lruCache = LRUCacheProvider.createLRUCache(new CacheLimits(150));
+        this.lruCache = LRUCacheProvider.createLRUCache(new CacheLimits(500));
     }
 
     public CompletableFuture<Boolean> addUser(
@@ -45,6 +46,15 @@ public class UserService {
                 }
 
                 if (!isValidAge(dateOfBirth)) {
+                    return false;
+                }
+
+                ObjectNode root = loadRootObject();
+                if (root == null) {
+                    return false;
+                }
+                ArrayNode users = getOrCreateUsersArray(root);
+                if (emailAlreadyExists(users, email)) {
                     return false;
                 }
 
@@ -68,16 +78,8 @@ public class UserService {
                 ClientType.fromName(client.getName()).applyCreditLimit(user);
 
                 // Add user to database
-                ArrayNode users = loadUsersArray();
-                if (users == null) {
-                    return false;
-                }
                 users.add(objectMapper.valueToTree(user));
-
-                File dbFile = new File(DB_FILE);
-                ObjectNode root = objectMapper.createObjectNode();
-                root.set("users", users);
-                objectMapper.writeValue(dbFile, root);
+                persistRootObject(root);
 
                 // Add user to cache
                 lruCache.set(user.getEmail(), user);
@@ -96,21 +98,18 @@ public class UserService {
                     return false;
                 }
 
-                File dbFile = new File(DB_FILE);
-                ArrayNode users = loadUsersArray();
-                if (users == null) {
+                ObjectNode root = loadRootObject();
+                if (root == null) {
                     return false;
                 }
+                ArrayNode users = getOrCreateUsersArray(root);
 
                 // Find and update user
                 for (int i = 0; i < users.size(); i++) {
                     ObjectNode userNode = (ObjectNode) users.get(i);
                     if (userNode.get("id").asText().equals(user.getId())) {
                         users.set(i, objectMapper.valueToTree(user));
-
-                        ObjectNode root = objectMapper.createObjectNode();
-                        root.set("users", users);
-                        objectMapper.writeValue(dbFile, root);
+                        persistRootObject(root);
 
                         // Update cache to keep it synchronized
                         lruCache.set(user.getEmail(), user);
@@ -128,15 +127,16 @@ public class UserService {
     public CompletableFuture<List<User>> getAllUsers() {
         return CompletableFuture.supplyAsync(() -> {
             try {
-
-                ArrayNode users = loadUsersArray();
-                if (users == null) {
+                ObjectNode root = loadRootObject();
+                if (root == null) {
                     return new ArrayList<>();
                 }
+                ArrayNode users = getOrCreateUsersArray(root);
 
                 List<User> userList = new ArrayList<>();
                 for (int i = 0; i < users.size(); i++) {
                     User user = objectMapper.treeToValue(users.get(i), User.class);
+                    lruCache.set(user.getEmail(), user);
                     userList.add(user);
                 }
                 return userList;
@@ -155,11 +155,11 @@ public class UserService {
         
         return CompletableFuture.supplyAsync(() -> {
             try {
-
-                ArrayNode users = loadUsersArray();
-                if (users == null) {
+                ObjectNode root = loadRootObject();
+                if (root == null) {
                     return null;
                 }
+                ArrayNode users = getOrCreateUsersArray(root);
 
                 for (int i = 0; i < users.size(); i++) {
                     ObjectNode userNode = (ObjectNode) users.get(i);
@@ -180,24 +180,54 @@ public class UserService {
         });
     }
 
-    private ArrayNode loadUsersArray() throws IOException {
-        File file = new File(DB_FILE);
+    private ObjectNode loadRootObject() throws IOException {
+        File file = new File(dbFile);
         if (!file.exists()) {
             return null;
         }
 
         ObjectNode root = (ObjectNode) objectMapper.readTree(file);
-        if (root == null || !root.has("users")) {
+        if (root == null) {
             return null;
+        }
+        return root;
+    }
+
+    private ArrayNode getOrCreateUsersArray(ObjectNode root) {
+        if (!root.has("users")) {
+            ArrayNode users = objectMapper.createArrayNode();
+            root.set("users", users);
+            return users;
         }
         return (ArrayNode) root.get("users");
     }
 
+    private void persistRootObject(ObjectNode root) throws IOException {
+        File file = new File(dbFile);
+        objectMapper.writeValue(file, root);
+    }
+
+    private boolean emailAlreadyExists(ArrayNode users, String email) {
+        for (int i = 0; i < users.size(); i++) {
+            ObjectNode userNode = (ObjectNode) users.get(i);
+            if (userNode.has("email") && email.equals(userNode.get("email").asText())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean isValidUserInput(String firstname, String surname, String email) {
-        return firstname != null && surname != null && email != null;
+        if (firstname == null || surname == null || email == null || firstname.isBlank() || surname.isBlank()) {
+            return false;
+        }
+        return email.contains("@");
     }
 
     private boolean isValidAge(LocalDate dateOfBirth) {
+        if (dateOfBirth == null) {
+            return false;
+        }
         int age = Period.between(dateOfBirth, LocalDate.now()).getYears();
         return age >= 21;
     }
